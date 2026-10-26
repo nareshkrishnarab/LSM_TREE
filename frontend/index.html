@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LSM Ride Store</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --line:#2a323d; --text:#e6edf3; --mute:#8b98a7;
+    --accent:#4cc2ff; --green:#3fb68b; --amber:#e8a838; --red:#ef6b6b; --violet:#a78bfa;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .sub{color:var(--mute);font-size:12px}
+  .pill{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mute)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--mute)}
+  .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+  main{padding:16px 20px;display:grid;gap:16px;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+  @media (max-width:1100px){main{grid-template-columns:1fr}}
+  .stack{display:grid;gap:16px;align-content:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.9px;color:var(--mute);margin:0 0 10px;font-weight:600}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;grid-column:1/-1}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .stat .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
+  .stat .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.7px}
+  .hint{color:var(--mute);font-size:12px;margin:6px 0 0}
+  /* LSM structure */
+  .lane{display:flex;align-items:center;gap:10px;margin:7px 0;min-height:38px}
+  .lane .name{width:78px;flex:none;font-size:12px;color:var(--mute)}
+  .lane .name b{display:block;color:var(--text);font-size:13px}
+  .bar{flex:1;height:26px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;position:relative;overflow:hidden}
+  .bar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#1f6f9a,var(--accent));transition:width .3s}
+  .bar span{position:absolute;inset:0;display:flex;align-items:center;padding:0 10px;font:12px var(--mono)}
+  .tables{flex:1;display:flex;flex-wrap:wrap;gap:6px;min-height:30px;align-items:center;background:var(--panel2);border:1px dashed var(--line);border-radius:6px;padding:4px 6px}
+  .tbl{height:26px;border-radius:4px;font:11px var(--mono);display:flex;align-items:center;justify-content:center;color:#06121a;cursor:default;transition:all .3s}
+  .empty{color:var(--mute);font-size:12px;padding-left:4px}
+  .arrow{margin-left:88px;color:var(--mute);font-size:11px}
+  /* forms */
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:8px}
+  label{display:flex;flex-direction:column;font-size:11px;color:var(--mute);gap:3px}
+  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font:13px var(--mono);min-width:0}
+  input[type=number]{width:96px} input.wide{width:210px}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 12px;font:600 12.5px system-ui;cursor:pointer}
+  button:hover{border-color:var(--accent)} button.go{background:#12384a;border-color:#1f6f9a}
+  button.danger{background:#3b1d1f;border-color:#6d2f33} button.ok{background:#12372c;border-color:#1f6e57}
+  button:disabled{opacity:.45;cursor:default}
+  canvas{width:100%;height:auto;background:#0b0f14;border:1px solid var(--line);border-radius:8px;display:block;cursor:crosshair}
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--mute);margin-top:8px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th{color:var(--mute);text-align:left;font-weight:600;padding:4px 8px;border-bottom:1px solid var(--line)}
+  td{padding:4px 8px;border-bottom:1px solid #1f2630;font-variant-numeric:tabular-nums}
+  tr.click{cursor:pointer} tr.click:hover td{background:var(--panel2)}
+  .tag{font:11px var(--mono);padding:2px 7px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+  .trace{font:12px var(--mono);margin:6px 0 0;padding:0;list-style:none}
+  .trace li{padding:3px 0 3px 10px;border-left:3px solid var(--line)}
+  .trace li.hit{border-color:var(--green);color:var(--green)} .trace li.skip{border-color:var(--accent)}
+  .trace li.fp{border-color:var(--amber);color:var(--amber)} .trace li.tomb{border-color:var(--red);color:var(--red)}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:12px var(--mono);overflow:auto;max-height:180px;margin:6px 0 0;white-space:pre-wrap;word-break:break-all}
+  .scroll{max-height:200px;overflow:auto}
+  .timeline{margin:8px 0 0;padding:0;list-style:none}
+  .timeline li{padding:4px 0 4px 12px;border-left:2px solid var(--violet);margin-left:4px;font-size:12.5px}
+  #toast{position:fixed;right:18px;bottom:18px;background:#3b1d1f;border:1px solid #6d2f33;padding:10px 14px;border-radius:8px;display:none;max-width:420px;z-index:9}
+  #toast.good{background:#12372c;border-color:#1f6e57}
+</style>
+</head>
+<body>
+<header>
+  <h1>LSM Ride Store</h1>
+  <span class="sub">write-optimised driver location &amp; trip-event storage · LSM tree</span>
+  <div class="pill"><span class="dot" id="simDot"></span><span id="simText">simulator stopped</span></div>
+</header>
+
+<main>
+  <section class="stats" id="stats"></section>
+
+  <div class="stack">
+    <div class="card">
+      <h2>LSM tree — live structure</h2>
+      <div class="lane"><div class="name"><b>WAL</b>on disk</div>
+        <div class="bar"><i id="walFill" style="width:0"></i><span id="walTxt"></span></div></div>
+      <div class="lane"><div class="name"><b>MemTable</b>skip list · RAM</div>
+        <div class="bar"><i id="memFill" style="width:0"></i><span id="memTxt"></span></div></div>
+      <div class="arrow" id="flushArrow">▼ when full → flushed as an immutable SSTable into L0</div>
+      <div id="levels"></div>
+      <p class="hint">Each block is an SSTable (size ∝ record count; hover for details). When a level collects the trigger count of tables they are merged (heap-based k-way merge) into one table on the next level — duplicates and old versions disappear.</p>
+    </div>
+
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="row">
+        <label>Drivers<input type="number" id="simN" value="40" min="1" max="1000"></label>
+        <label>GPS updates / sec<input type="number" id="simR" value="60" min="1" max="2000"></label>
+        <button class="go" id="simStart">▶ Start simulator</button>
+        <button id="simStop">■ Stop</button>
+      </div>
+      <div class="row">
+        <label>Benchmark: GPS updates<input type="number" id="benchN" value="5000" min="100" max="200000" step="500"></label>
+        <button class="go" id="benchBtn">⚡ Run write benchmark</button>
+        <button id="flushBtn">Flush MemTable</button>
+        <button id="compactBtn">Force compaction</button>
+        <button class="danger" id="resetBtn">Reset all data</button>
+      </div>
+      <div id="benchOut" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recent compactions</h2>
+      <div class="scroll"><table><thead><tr><th>Level</th><th>Tables</th><th>Entries in → out</th><th>Reclaimed</th><th>Tombstones dropped?</th><th>ms</th></tr></thead>
+      <tbody id="compBody"><tr><td colspan="6" class="empty">none yet — run the simulator or benchmark</td></tr></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Key explorer — see how a read travels through the tree</h2>
+      <div class="row">
+        <label>Key<input class="wide" id="kvKey" value="driver:latest:D001"></label>
+        <button class="go" id="kvGet">GET with trace</button>
+        <label>Prefix<input class="wide" id="kvPrefix" value="driver:hist:D001:"></label>
+        <button id="kvScan">SCAN prefix</button>
+      </div>
+      <div id="kvOut"></div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <h2>Live map — latest location per driver</h2>
+      <canvas id="map" width="760" height="520"></canvas>
+      <div class="legend">
+        <span><i style="background:#3fb68b"></i>available</span><span><i style="background:#e8a838"></i>busy</span>
+        <span><i style="background:#4cc2ff"></i>selected</span><span><i style="background:#a78bfa"></i>pickup / drop</span>
+        <span id="driverCount"></span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>Click on map sets
+          <select id="clickMode"><option value="pickup">trip pickup</option><option value="drop">trip drop</option><option value="driver">driver position</option><option value="select">select nearest driver</option></select>
+        </label>
+        <span class="hint" id="clickInfo">pickup: – · drop: –</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Driver app (location ping)</h2>
+      <div class="row">
+        <label>Driver id<input id="dId" value="D001" style="width:90px"></label>
+        <label>Lat<input type="number" id="dLat" step="0.0001" value="19.0800"></label>
+        <label>Lng<input type="number" id="dLng" step="0.0001" value="72.8750"></label>
+        <label>Status<select id="dStatus"><option>AVAILABLE</option><option>BUSY</option></select></label>
+      </div>
+      <div class="row">
+        <button class="go" id="dSend">Send location</button>
+        <button id="dHist">Last 15 pings</button>
+        <button class="danger" id="dOff">Go offline (tombstone)</button>
+        <button id="dNear">Nearby available (3 km)</button>
+      </div>
+      <div id="dOut"></div>
+    </div>
+
+    <div class="card">
+      <h2>Rider app (trips &amp; events)</h2>
+      <div class="row">
+        <label>Rider id<input id="rId" value="R100" style="width:90px"></label>
+        <label style="flex-direction:row;align-items:center;gap:6px;margin-bottom:6px"><input type="checkbox" id="rAuto" checked style="width:auto;min-width:0"> auto-assign nearest driver</label>
+        <button class="go" id="rReq">Request trip</button>
+      </div>
+      <div class="scroll"><table><thead><tr><th>Trip</th><th>Status</th><th>Driver</th><th>Events</th></tr></thead><tbody id="tripBody"></tbody></table></div>
+      <div id="tripDetail"></div>
+    </div>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const CITY = {latMin:19.040, latMax:19.120, lngMin:72.830, lngMax:72.920};
+let drivers = [], selected = null, selTrail = [], pickup = null, drop = null, activeTrip = null;
+let lastWrites = 0, lastT = performance.now(), wps = 0;
+
+/* ---------- helpers ---------- */
+function toast(msg, good){ const t=$('toast'); t.textContent=msg; t.className=good?'good':''; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',3500); }
+async function api(path, method='GET', body){
+  const r = await fetch(path, {method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
+  const data = await r.json().catch(()=>({error:'bad response'}));
+  if(!r.ok){ throw new Error(data.error || r.statusText); }
+  return data;
+}
+async function act(fn){ try{ return await fn(); }catch(e){ toast(e.message); } }
+const fmt = n => Number(n).toLocaleString();
+const kb = b => b<1024 ? b+' B' : (b/1024).toFixed(1)+' KB';
+
+/* ---------- stats + structure ---------- */
+function renderStats(s){
+  const c = s.counters, writes = c.puts + c.deletes, now = performance.now();
+  const dt = (now-lastT)/1000;
+  if(dt>0.4){ wps = Math.max(0,(writes-lastWrites)/dt); lastWrites=writes; lastT=now; }
+  const cards = [
+    ['Total writes', fmt(writes)], ['Writes / sec', fmt(Math.round(wps))], ['Flushes', fmt(c.flushes)],
+    ['Compactions', fmt(c.compactions)], ['SSTables', fmt(s.tables)],
+    ['Write amplification', s.write_amplification ? s.write_amplification+'×' : '–'],
+    ['Table reads skipped (range+Bloom)', s.probes_saved_pct+'%'], ['Entries reclaimed', fmt(c.entries_reclaimed)],
+  ];
+  $('stats').innerHTML = cards.map(([l,v])=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  const on = s.sim.running;
+  $('simDot').className = 'dot'+(on?' on':'');
+  $('simText').textContent = on ? `simulator running · ${s.sim.drivers} drivers · ${fmt(s.sim.pings_sent)} pings · ${s.sim.active_trips} live trips` : 'simulator stopped';
+  const rows = s.recent_compactions.slice().reverse().map(e=>`<tr><td>L${e.from_level} → L${e.to_level}</td><td>${e.tables_merged}</td><td>${fmt(e.entries_in)} → ${fmt(e.entries_out)}</td><td>${fmt(e.reclaimed)}</td><td>${e.tombstones_dropped?'yes':'no'}</td><td>${e.ms}</td></tr>`);
+  $('compBody').innerHTML = rows.join('') || '<tr><td colspan="6" class="empty">none yet — run the simulator or benchmark</td></tr>';
+}
+function renderStructure(s){
+  const m = s.memtable, pct = Math.min(100, 100*m.bytes/m.max_bytes);
+  $('memFill').style.width = pct+'%';
+  $('memTxt').textContent = `${fmt(m.entries)} entries · ${kb(m.bytes)} / ${kb(m.max_bytes)} (${pct.toFixed(0)}%)`;
+  $('walFill').style.width = Math.min(100, 100*s.wal_bytes/(m.max_bytes*2.2))+'%';
+  $('walTxt').textContent = kb(s.wal_bytes);
+  const colors = ['#4cc2ff','#3fb68b','#e8a838','#a78bfa'];
+  $('levels').innerHTML = s.levels.map((tables, i)=>{
+    const blocks = tables.map(t=>{
+      const w = Math.round(30 + Math.sqrt(t.count)*5.2);
+      const tip = `SSTable #${t.id}\n${t.count} records (${t.tombstones} tombstones)\n${kb(t.size_bytes)}\nkeys ${t.min_key} … ${t.max_key}\nBloom: ${t.bloom_bits} bits, ${t.bloom_hashes} hashes`;
+      return `<div class="tbl" style="width:${w}px;background:${colors[i%4]}" title="${esc(tip)}">#${t.id}</div>`;
+    }).join('');
+    return `<div class="lane"><div class="name"><b>L${i}</b>${tables.length}/${s.compaction_trigger} tables</div><div class="tables">${blocks||'<span class="empty">empty</span>'}</div></div>`;
+  }).join('');
+}
+async function pollStats(){
+  try{ const [s, st] = await Promise.all([api('/api/stats'), api('/api/structure')]); renderStats(s); renderStructure(st); }catch(e){}
+}
+
+/* ---------- map ---------- */
+const cv = $('map'), ctx = cv.getContext('2d');
+const px = lng => (lng-CITY.lngMin)/(CITY.lngMax-CITY.lngMin)*cv.width;
+const py = lat => cv.height - (lat-CITY.latMin)/(CITY.latMax-CITY.latMin)*cv.height;
+const unx = x => CITY.lngMin + x/cv.width*(CITY.lngMax-CITY.lngMin);
+const uny = y => CITY.latMin + (cv.height-y)/cv.height*(CITY.latMax-CITY.latMin);
+function drawMap(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.strokeStyle = '#161d26'; ctx.lineWidth = 1;
+  for(let i=1;i<10;i++){ ctx.beginPath(); ctx.moveTo(i*cv.width/10,0); ctx.lineTo(i*cv.width/10,cv.height); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,i*cv.height/10); ctx.lineTo(cv.width,i*cv.height/10); ctx.stroke(); }
+  if(selTrail.length>1){ ctx.strokeStyle='#4cc2ff88'; ctx.lineWidth=2; ctx.beginPath(); selTrail.forEach((p,i)=>{ i?ctx.lineTo(px(p.lng),py(p.lat)):ctx.moveTo(px(p.lng),py(p.lat)); }); ctx.stroke(); }
+  for(const d of drivers){
+    const sel = d.driver_id===selected;
+    ctx.fillStyle = sel ? '#4cc2ff' : (d.status==='BUSY' ? '#e8a838' : '#3fb68b');
+    ctx.beginPath(); ctx.arc(px(d.lng), py(d.lat), sel?7:4, 0, 7); ctx.fill();
+    if(sel){ ctx.strokeStyle='#4cc2ff'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(px(d.lng),py(d.lat),12,0,7); ctx.stroke(); ctx.fillStyle='#e6edf3'; ctx.font='12px monospace'; ctx.fillText(d.driver_id, px(d.lng)+14, py(d.lat)-8); }
+  }
+  const pin = (p,label)=>{ if(!p) return; ctx.fillStyle='#a78bfa'; ctx.beginPath(); ctx.arc(px(p.lng),py(p.lat),7,0,7); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'; ctx.fillText(label, px(p.lng)+10, py(p.lat)+4); };
+  pin(pickup,'pickup'); pin(drop,'drop');
+  $('driverCount').textContent = drivers.length + ' drivers online';
+}
+cv.addEventListener('click', ev=>{
+  const r = cv.getBoundingClientRect();
+  const x = (ev.clientX-r.left)*cv.width/r.width, y = (ev.clientY-r.top)*cv.height/r.height;
+  const pt = {lat:+uny(y).toFixed(5), lng:+unx(x).toFixed(5)};
+  const mode = $('clickMode').value;
+  if(mode==='pickup') pickup = pt; else if(mode==='drop') drop = pt;
+  else if(mode==='driver'){ $('dLat').value = pt.lat; $('dLng').value = pt.lng; }
+  else { let best=null, bd=1e9; for(const d of drivers){ const dd=(px(d.lng)-x)**2+(py(d.lat)-y)**2; if(dd<bd){bd=dd;best=d;} } if(best){ selectDriver(best.driver_id); } }
+  $('clickInfo').textContent = `pickup: ${pickup?pickup.lat+', '+pickup.lng:'–'} · drop: ${drop?drop.lat+', '+drop.lng:'–'}`;
+  drawMap();
+});
+async function selectDriver(id){
+  selected = id; $('dId').value = id;
+  const d = drivers.find(x=>x.driver_id===id); if(d){ $('dLat').value=d.lat; $('dLng').value=d.lng; $('dStatus').value=d.status==='BUSY'?'BUSY':'AVAILABLE'; }
+  $('kvKey').value = 'driver:latest:'+id; $('kvPrefix').value = 'driver:hist:'+id+':';
+  await act(async()=>{ selTrail = (await api(`/api/driver/${id}/history?limit=30`)).slice().reverse(); drawMap(); });
+}
+async function pollDrivers(){
+  try{ drivers = await api('/api/drivers?limit=1000'); if(selected){ selTrail=(await api(`/api/driver/${selected}/history?limit=30`).catch(()=>[])).slice().reverse(); } drawMap(); }catch(e){}
+}
+
+/* ---------- controls ---------- */
+$('simStart').onclick = ()=>act(async()=>{ await api('/api/sim/start','POST',{drivers:+$('simN').value, updates_per_sec:+$('simR').value}); toast('simulator started',true); pollStats(); });
+$('simStop').onclick  = ()=>act(async()=>{ await api('/api/sim/stop','POST'); pollStats(); });
+$('flushBtn').onclick = ()=>act(async()=>{ await api('/api/admin/flush','POST'); toast('MemTable flushed to L0',true); pollStats(); });
+$('compactBtn').onclick = ()=>act(async()=>{ const r=await api('/api/admin/compact','POST'); toast(r.event?`compacted L${r.event.from_level}→L${r.event.to_level}`:'nothing to compact yet',true); pollStats(); });
+$('resetBtn').onclick = ()=>{ if(!confirm('Delete ALL stored data and restart empty?')) return; act(async()=>{ await api('/api/admin/reset','POST'); selected=null; selTrail=[]; drivers=[]; $('tripDetail').innerHTML=''; $('dOut').innerHTML=''; $('kvOut').innerHTML=''; toast('all data wiped',true); pollStats(); pollDrivers(); }); };
+$('benchBtn').onclick = async ()=>{
+  const b=$('benchBtn'); b.disabled=true; b.textContent='running…'; $('benchOut').textContent='';
+  await act(async()=>{ const r = await api('/api/bench','POST',{updates:+$('benchN').value});
+    $('benchOut').innerHTML = `<b>${fmt(r.updates)}</b> GPS updates (${fmt(r.lsm_writes)} LSM writes) in <b>${r.seconds}s</b> → <b>${fmt(r.lsm_writes_per_sec)} writes/sec</b>, causing ${r.flushes} flushes and ${r.compactions} compactions.`; });
+  b.disabled=false; b.textContent='⚡ Run write benchmark'; pollStats(); pollDrivers();
+};
+
+/* ---------- driver app ---------- */
+$('dSend').onclick = ()=>act(async()=>{
+  const p = await api('/api/driver/location','POST',{driver_id:$('dId').value, lat:+$('dLat').value, lng:+$('dLng').value, status:$('dStatus').value, speed:20});
+  $('dOut').innerHTML = `<pre>${esc(JSON.stringify(p,null,1))}</pre>`; pollDrivers(); pollStats();
+});
+$('dHist').onclick = ()=>act(async()=>{
+  const h = await api(`/api/driver/${encodeURIComponent($('dId').value)}/history?limit=15`);
+  $('dOut').innerHTML = `<div class="scroll"><table><thead><tr><th>time</th><th>lat</th><th>lng</th><th>speed</th><th>status</th></tr></thead><tbody>${h.map(p=>`<tr><td>${new Date(p.ts).toLocaleTimeString()}</td><td>${p.lat}</td><td>${p.lng}</td><td>${p.speed}</td><td>${p.status}</td></tr>`).join('')}</tbody></table></div><p class="hint">newest first — a single prefix scan thanks to the reversed-timestamp key</p>`;
+  selectDriver($('dId').value);
+});
+$('dOff').onclick = ()=>act(async()=>{ await api('/api/driver/offline','POST',{driver_id:$('dId').value}); toast('tombstone written — driver removed from the map',true); if(selected===$('dId').value){selected=null;selTrail=[];} pollDrivers(); pollStats(); });
+$('dNear').onclick = ()=>act(async()=>{
+  const n = await api(`/api/drivers/nearby?lat=${$('dLat').value}&lng=${$('dLng').value}&radius_km=3&limit=8`);
+  $('dOut').innerHTML = n.length ? `<table><thead><tr><th>driver</th><th>distance</th><th>speed</th></tr></thead><tbody>${n.map(d=>`<tr class="click" data-id="${esc(d.driver_id)}"><td>${esc(d.driver_id)}</td><td>${d.distance_km} km</td><td>${d.speed}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">no available drivers within 3 km of that point</p>';
+  document.querySelectorAll('#dOut tr.click').forEach(tr=>tr.onclick=()=>selectDriver(tr.dataset.id));
+});
+
+/* ---------- trips ---------- */
+const NEXT = {REQUESTED:['DRIVER_ASSIGNED','CANCELLED'], DRIVER_ASSIGNED:['DRIVER_ARRIVED','CANCELLED'], DRIVER_ARRIVED:['TRIP_STARTED','CANCELLED'], TRIP_STARTED:['TRIP_COMPLETED'], TRIP_COMPLETED:[], CANCELLED:[]};
+$('rReq').onclick = ()=>act(async()=>{
+  const p = pickup || {lat:+(CITY.latMin+Math.random()*(CITY.latMax-CITY.latMin)).toFixed(5), lng:+(CITY.lngMin+Math.random()*(CITY.lngMax-CITY.lngMin)).toFixed(5)};
+  const d = drop   || {lat:+(CITY.latMin+Math.random()*(CITY.latMax-CITY.latMin)).toFixed(5), lng:+(CITY.lngMin+Math.random()*(CITY.lngMax-CITY.lngMin)).toFixed(5)};
+  const t = await api('/api/trip/request','POST',{rider_id:$('rId').value, pickup:p, drop:d, auto_assign:$('rAuto').checked});
+  toast('trip '+t.trip_id+' → '+t.status, true); activeTrip=t.trip_id; showTrip(t.trip_id); pollTrips();
+});
+async function pollTrips(){
+  try{
+    const t = await api('/api/trips');
+    $('tripBody').innerHTML = t.map(s=>`<tr class="click" data-id="${s.trip_id}"><td>${s.trip_id}</td><td><span class="tag">${s.status}</span></td><td>${s.driver_id||'–'}</td><td>${s.events}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">no trips yet</td></tr>';
+    document.querySelectorAll('#tripBody tr.click').forEach(tr=>tr.onclick=()=>{ activeTrip=tr.dataset.id; showTrip(activeTrip); });
+    if(activeTrip) showTrip(activeTrip, true);
+  }catch(e){}
+}
+async function showTrip(id, quiet){
+  try{
+    const t = await api('/api/trip/'+id), s = t.state, nx = NEXT[s.status]||[];
+    $('tripDetail').innerHTML = `<h2 style="margin-top:12px">Trip ${s.trip_id} — event log (prefix scan trip:${s.trip_id}:)</h2>
+      <ul class="timeline">${t.events.map(e=>`<li><b>${e.type}</b> <span class="hint">#${e.n} · ${new Date(e.ts).toLocaleTimeString()}${e.driver_id?' · '+e.driver_id:''}</span></li>`).join('')}</ul>
+      <div class="row" style="margin-top:8px">${nx.map(n=>`<button data-ev="${n}" class="${n==='CANCELLED'?'danger':'ok'}">→ ${n}</button>`).join('') || '<span class="hint">trip finished</span>'}
+      ${s.status==='REQUESTED'?'<button data-assign="1" class="go">Auto-assign driver</button>':''}</div>`;
+    document.querySelectorAll('#tripDetail button[data-ev]').forEach(b=>b.onclick=()=>act(async()=>{ await api('/api/trip/event','POST',{trip_id:id,type:b.dataset.ev}); showTrip(id); pollTrips(); pollDrivers(); }));
+    document.querySelectorAll('#tripDetail button[data-assign]').forEach(b=>b.onclick=()=>act(async()=>{ await api('/api/trip/assign','POST',{trip_id:id}); showTrip(id); pollTrips(); }));
+  }catch(e){ if(!quiet) toast(e.message); }
+}
+
+/* ---------- key explorer ---------- */
+$('kvGet').onclick = ()=>act(async()=>{
+  const r = await api('/api/kv/get?key='+encodeURIComponent($('kvKey').value));
+  const cls = s => /^hit/.test(s)?'hit':/tombstone/.test(s)?'tomb':/false positive/.test(s)?'fp':'skip';
+  $('kvOut').innerHTML = `<p class="hint">${r.found?'<b style="color:var(--green)">FOUND</b>':'<b style="color:var(--red)">NOT FOUND</b>'} in ${r.micros} µs — places probed, newest first:</p>
+    <ul class="trace">${r.trace.map(s=>`<li class="${cls(s.result)}">${esc(s.where)} — ${esc(s.result)}</li>`).join('')}</ul>${r.found?`<pre>${esc(JSON.stringify(r.value,null,1))}</pre>`:''}`;
+});
+$('kvScan').onclick = ()=>act(async()=>{
+  const r = await api(`/api/kv/scan?limit=15&prefix=`+encodeURIComponent($('kvPrefix').value));
+  $('kvOut').innerHTML = `<p class="hint">${r.length} key(s), returned in sorted order (merge of MemTable + all SSTables):</p><pre>${esc(r.map(x=>x.key+'  →  '+JSON.stringify(x.value)).join('\n')||'(none)')}</pre>`;
+});
+
+/* ---------- boot ---------- */
+pollStats(); pollDrivers(); pollTrips(); drawMap();
+setInterval(pollStats, 800); setInterval(pollDrivers, 1200); setInterval(pollTrips, 2500);
+</script>
+</body>
+</html>
